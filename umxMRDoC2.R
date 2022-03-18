@@ -1,4 +1,5 @@
-## Beta software, test before production use
+## Beta software, test before production use. Note rf requirement there,
+## which is something we are trying to change
 ## This function should be added to umx() in the future
 ## It is a shorter version of the MR-DoC2 model
 
@@ -77,7 +78,6 @@ umxMRDoC2 <- function(pheno, prss,
     NA,NA,"x2","xrfy",
     NA,NA,"xrfy","y2"), 4, 4, byrow=T)
 
-
   mxfreeC <- matrix(c(
     T,T,F,F,
     T,T,F,F,
@@ -110,55 +110,68 @@ umxMRDoC2 <- function(pheno, prss,
     0,0,0,0,1,0,0,0,
     0,0,0,0,0,1,0,0),ny1,ny,byrow=T)
 
- top = mxModel('top',
-               umxMatrix('BE',  'Full', nrow = ne_, ncol = ne_,
-                         free = mxfreeBE, labels = mxlabelsBE),
-               umxMatrix('I', 'Iden', nrow = ne_, ncol = ne_),
-               umxMatrix('F', 'Full', nrow = 6, ncol = 8, free = F,
-                         values = mxFilt),
-               umxMatrix('LY', 'Full', nrow = ne_, ncol = ne_,
-                         free = F, value = diag(ne_)),
-              umxMatrix('A', 'Symm', nrow = ne_, ncol = ne_, free = mxfreeA,
-                        value = mxvaluesA, labels=mxlabelsA),
-              umxMatrix('C', 'Symm', nrow=ne_, ncol=ne_, free = mxfreeC,
-                        labels=mxlabelsC),
-              umxMatrix('E', 'Symm',nrow=ne_,ncol=ne_, free = mxfreeE,
-                        labels = mxlabelsE),
-              umxMatrix('dzmu','Full',nrow = 1,ncol = ny, free = T,value = 0,
-                 labels = c('meB', 'meS', 'meFB', 'meFS',
-                            'meB', 'meS', 'meFB', 'meFS')),
-              mxAlgebra(expression = dzmu%*%t(F), name = 'mzmu'),
-              mxAlgebra(expression = solve(I-BE) %&% A, name = 'Av'),
-              mxAlgebra(expression = solve(I-BE) %&% C, name = 'Cv'),
-              mxAlgebra(expression = solve(I-BE) %&% E, name = 'Ev'),
-              mxAlgebra(expression = A+C+E, name = 'SPh'),
-              mxAlgebra(expression = rbind(
-                                   cbind(SPh, Av+Cv),
-                                   cbind(Av+Cv, SPh)),name='Smzv'),
-              mxAlgebra(expression = rbind(
-                                   cbind(SPh, .5 %x% Av + Cv),
-                                   cbind(.5 %x% Av + Cv, SPh)),
-                        name = 'expCovDZ'),
-              mxAlgebra(expression = F %&% Smzv, name = 'expCovMZ')
-   )
+top=mxModel('TwRM',
+    mxMatrix(type='Full',nrow=ne_,ncol=ne_,
+       free=mxfreeBE,labels=mxlabelsBE,
+       ubound=10,lbound=-10, name='BE'),
+    mxMatrix(type='Iden',nrow=ne_,ncol=ne_,name='I'),
+    mxMatrix(type='Full',nrow=6,ncol=8,free=F,values=mxFilt, name='F'),
 
-  MZ = mxModel("MZ", mzData,
-               # mxExpectationRAM(M="mzmu", A = "BE",  F = "F",   vnames[1:6] ),
-               mxExpectationNormal(covariance = "top.expCovMZ",
-                                   means = "top.mzmu",vnames[1:6]),
-               mxFitFunctionML())
+    mxMatrix(type='Full',nrow=ne_,ncol=ne_,
+     free = F,value = diag(ne_),labels = NA,
+       ubound=10,lbound=-10,name='LY'),
 
-  DZ = mxModel("DZ", dzData,
-               # mxExpectationRAM(M="dzmu", A = "BE", F = "F", vnames ),
-               mxExpectationNormal(covariance="top.expCovDZ",
-                                   means="top.dzmu",vnames),
-               mxFitFunctionML())
+    mxMatrix(type='Symm',nrow=ne_,ncol=ne_,
+       free=mxfreeA,labels=mxlabelsA,
+       ubound=10,lbound=-10,name='A'),
 
-  model = mxModel("MRDoC2", top, MZ, DZ,
-                  mxFitFunctionMultigroup(c("MZ","DZ")))
+    mxMatrix(type='Symm',nrow=ne_,ncol=ne_,
+       free=mxfreeC,labels=mxlabelsC,
+       ubound=10,lbound=-10,name='C'),
+
+    mxMatrix(type='Symm',nrow=ne_,ncol=ne_,
+       free=mxfreeE,labels=mxlabelsE,
+       ubound=10,lbound=-10,name='E'),
+
+    mxMatrix(type='Full',nrow=1,ncol=ny,
+     free=T,value=0,
+       labels=c('meB','meS','meFB','meFS','meB','meS','meFB','meFS'),
+       ubound=10,lbound=-10,name='dzmu'),
+    mxAlgebra(expression=dzmu%*%t(F), name='mzmu'),
+
+    mxAlgebra(expression=solve(I-BE),name='iBE'),
+
+    mxAlgebra(expression=iBE %*% A %*% t(iBE), name='A_'),
+    mxAlgebra(expression=iBE %*% C %*%t(iBE), name='C_'),
+    mxAlgebra(expression=iBE%*%E%*%t(iBE), name='E_'),
+    mxAlgebra(expression=A_ + C_ + E_, name='SPh'),
+    mxAlgebra(expression=rbind(
+                         cbind(SPh, A_+C_),
+                         cbind(A_+C_, SPh)),name='Smz_'),
+    mxAlgebra(expression=rbind(
+                         cbind(SPh, .5%x%A_+C_),
+                         cbind(.5%x%A_+C_, SPh)),name='Sdz'),
+
+    mxAlgebra(expression=F%*%Smz_%*%t(F),name='Smz')
+ )
+
+MZ=mxModel("MZ",mzData,
+  mxExpectationNormal(covariance="TwRM.Smz",means="TwRM.mzmu",vnames[1:6]),
+  mxFitFunctionML()
+)
+
+DZ=mxModel("DZ",dzData,
+     mxExpectationNormal(covariance="TwRM.Sdz",means="TwRM.dzmu",vnames),
+     mxFitFunctionML()
+)
+
+
+model =  mxModel("MRDoC2", top, MZ, DZ,
+mxFitFunctionMultigroup( c("MZ","DZ") )
+ )
   # model = as(model, "MxModel")
   model = mxAutoStart(model)
-  model = umxModify(model, update = c("x2", "y2"),  value = 1)
+  # model = umxModify(model, update = c("x2", "y2"),  value = 1)
 
   model = xmu_safe_run_summary(model, autoRun = autoRun, tryHard = tryHard,
                                std = T)
